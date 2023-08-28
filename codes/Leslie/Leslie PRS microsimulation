@@ -1,0 +1,381 @@
+rm(list = ls())
+gc()
+memory.limit(size=10^10)
+
+setwd("~/ECHO/obesity")
+
+#########
+# Stable-population model
+# for the forecasting of obesity prevalence
+# across generations (Aldea, Garcia, Palloni) - MICROSIMULATION WITH PRS
+# WITH 4 BMI CLASSES (< 18.5, [18.5-25), [25-30), >= 30)
+####################
+
+#number of generations
+g <- 20
+#number of simulations
+ss <- 5
+
+
+#Degree of assortative mating (between 0 & 1)
+omega <- 0
+
+
+#couple classes
+class <- c(11,12,13,14,21,22,23,24,31,32,33,34,41,42,43,44)
+
+#heritability matrix
+her <- array(0:0, c(4,16))
+#bmi & pgs by cat
+bmis <- array(0:0, c(4,16))
+pgss <- array(0:0, c(4,16))
+
+dis <- array(0:0, c(g, 4, ss))
+bmir <- array(0:0, c(g, 2, ss))
+bmi_cat <- array(0:0, c(g, 4, 2, ss))
+prs <- array(0:0, c(g, 2, ss))
+prs_cat <- array(0:0, c(g, 4, 2, ss))
+
+bmi_sim <- array(0:0, c(g, 2, ss))
+prs_sim <- array(0:0, c(g, 2, ss))
+
+
+matrices <- array(0:0, c(4,4,g))
+
+#fin <- array(0:0, c(11, 5, ss))
+
+for (u in 1:2){
+  for (ffff in 1:2){
+  
+  omega <- 0.5 * (u-1) #(u-1) * 0.5  
+  print (omega)
+  phi <- (ffff-1)*0.5
+  print (phi)
+  
+  
+  # we have ss simulations
+  for (s in 1:ss){
+    
+    #1. Create the 1st generation from HRS data
+    #------------
+    ff <- read.csv(paste("~/ECHO/obesity/Sim_Alberto_final/mat_", s, ".csv", sep=""))
+    
+    # number of children
+    ch <- sum(ff$totchild)
+    
+    #distribute generation of children by BMI groups
+    #dis[1, , s] <- c(sum(ff$totchild * ff$fract1), sum(ff$totchild * ff$fract2), sum(ff$totchild * ff$fract3), sum(ff$totchild * ff$fract4)) / ch
+    
+    pgs <- array(0:0, c(ch, 2))
+    
+    ct <- 0 #counter
+    
+    #assign PGS to every individual
+    for (i in 1:15){
+      for (j in 1:4){
+        n <- as.integer (round (ff$totchild[i] * ff [i, 6 + j], digits = 0))
+        #print (n)
+        if (n > 0){
+          for (k in 1:n){
+            ct <- ct + 1
+            if (n==1){
+              pgs [ct, ] <- c (ff [i, j + 10] , j)
+            }else{
+              pgs [ct, ] <- c (rnorm(1, mean=ff [i, j + 10], sd=ff [i, j + 14]) , j)
+            }
+          }
+        }
+      }
+    }
+    
+    #now we have the individuals of the first generation with their PGS and obesity class
+    
+    pgs <- as.data.frame(pgs)
+    colnames(pgs) <- c("ps", "BMI")
+    
+    
+    #assign distribution
+    
+    dis[1, , s] <- table(pgs$BMI)/sum(table(pgs$BMI))
+    
+    #stock 1st pgs
+    prs [1,1,s] <- mean(pgs$ps)
+    prs [1,2,s] <- sd(pgs$ps)
+    
+    prs_sim [1,1,s] <- mean(pgs$ps)
+    prs_sim [1,2,s] <- sd(pgs$ps)
+    
+    for (w in 1:4){
+      prs_cat [1,w,1,s] <- mean(pgs$ps[pgs$BMI == w])
+      prs_cat [1,w,2,s] <- sd(pgs$ps[pgs$BMI == w])
+    }
+    
+    #--------------------
+    # 2. Next generations
+    #---------------------
+    for (t in 2:g){
+      
+      #MATING MATRIX
+      #-------------
+      mated <- c(dis [t-1,1,s] * (dis [t-1,1,s] + (1-dis [t-1,1,s]) * omega),
+                 dis [t-1,1,s] * dis [t-1,2,s] * (1 - omega),
+                 dis [t-1,1,s] * dis [t-1,3,s] * (1 - omega), dis [t-1,1,s] * dis [t-1,4,s] * (1 - omega) ,
+                 dis [t-1,2,s] * dis [t-1,1,s] * (1 - omega),
+                 dis [t-1,2,s] * (dis [t-1,2,s] + (1-dis [t-1,2,s]) * omega),
+                 dis [t-1,2,s] * dis [t-1,3,s] * (1 - omega), dis [t-1,2,s] * dis [t-1,4,s] * (1 - omega) ,
+                 dis [t-1,3,s] * dis [t-1,1,s] * (1 - omega), dis [t-1,3,s] * dis [t-1,2,s] * (1 - omega) ,
+                 dis [t-1,3,s] * (dis [t-1,3,s] + (1-dis [t-1,3,s]) * omega),
+                 dis [t-1,3,s] * dis [t-1,4,s] * (1 - omega),
+                 dis [t-1,4,s] * dis [t-1,1,s] * (1 - omega), dis [t-1,4,s] * dis [t-1,2,s] * (1 - omega) ,
+                 dis [t-1,4,s] * dis [t-1,3,s] * (1 - omega), 
+                 dis [t-1,4,s] * (dis [t-1,4,s] + (1-dis [t-1,4,s]) * omega))
+      
+      #FERTILITY MATRIX
+      #---------------
+      fert <- array(0:0, c(16))
+      for (i in 1:4){
+        for (j in 1:4){
+          fert[(i-1)*4+j] <- 2 + (i+j-6) * 0.5 * phi
+          #fert[(i-1)*4+j] <- rpois(1, lambda = 1.1 + (i+j)*3/20)
+        }
+      }
+      
+      child <- mated * fert
+      
+      
+      #-------------------------------
+      ### MICROSIMULATION TO PRODUCE HERITABILITY MATRIX
+      #-------------------------------
+      
+      # couples matrix
+      coup <- as.data.frame(array(0:0, c(0, 2)))
+      cou <- 0
+      
+      # 3. Create couples
+      #-------------
+      #print ("bc")
+      pgs$c <- 0
+      
+      #define target number of endogamous couples
+      pi <- table(factor(pgs$BMI, levels = c(1,2,3,4)))/nrow(pgs)
+      
+      #target couples per cat.
+      target <- floor (pi * (pi + (1-pi) * omega) * floor(nrow(pgs)/2))
+      
+      #target random couples
+      tar_ran <- floor((1-omega)*nrow(pgs)/2)
+      
+      #the unmatched
+      left2 <- as.data.frame(array(0:0, c(0, 3)))
+      
+      
+      #--------------------
+      # first random couples, then endogamous
+      
+      #choose people randomly
+      tar_p <- as.integer(2*tar_ran)
+      
+      if(tar_ran>0){
+        index <- sample(1:nrow(pgs),tar_ran*2,replace=F)
+        meet <- pgs[index,]
+        left <- pgs[-c(index),]
+      }else{
+        index <- 0
+        meet <- pgs[index,]
+        left <- pgs
+      }
+      
+      
+      
+      if(nrow(meet)>0){
+        for (rw in 1:tar_ran){
+          m <- floor(runif(1, min=1, max=nrow(meet)-1))
+          coup <- rbind(coup, c(as.integer(paste(meet[1,2],meet[m+1,2],sep="")), as.numeric((meet[1,1]+ meet[m+1,1])/2)))
+          meet$c [1] <- 1 ; meet$c[m+1] <- 1
+          meet <- subset(meet, c== 0)
+        }
+      }
+      
+      if(nrow(left)>0){
+        for (b in 1:4){
+          no <- subset(left, left$BMI == b)
+          nb <- floor(nrow(no)/2)
+          if (nrow(no)>1){
+            for (row in 1:nb){
+              m <- floor(runif(1, min=1, max=nrow(no)-1))
+              coup <- rbind(coup, c(as.integer(paste(b,b,sep="")), as.numeric((no[1,1]+ no[m+1,1])/2)))
+              no$c [1] <- 1; no$c [m+1] <- 1
+              no <- subset(no, c == 0)
+            }
+            #save the unmatched
+            left2 <- rbind(left2, no)
+          }
+        }
+      }
+      
+      fc <- floor(nrow(left2)/2)
+      if (fc>0){
+        for (q in 1:fc){
+          qq <- (q-1)*2+1
+          coup <- rbind(coup, c(as.integer(paste(left2[qq,2],left2[qq+1,2],sep="")), as.numeric((left2[qq,1]+ left2[qq+1,1])/2)))
+        }
+      }
+      
+      
+      
+      #------------------
+      colnames(coup) <- c("V1", "V2")
+      
+      #4. ASSIGN FERTILITY LEVELS TO THOSE COUPLES
+      #--------------------------
+      #print ("past couples")
+      
+      coup <- subset(coup, V1 > 0)
+      
+      coup$ch <- 0
+      
+      for (i in 1:nrow(coup)){
+        minn <- 2 + 0.5 * phi * (as.integer(substr(coup[i,1],1,1)) + as.integer(substr(coup[i,1],2,2)) - 6)
+        if (minn == floor(minn)){
+          coup$ch [i] <- floor(minn) 
+        }else{
+          if (runif(1,0,1) > (minn - floor(minn))){coup$ch [i] <- floor(minn)}else{coup$ch [i] <- floor(minn) + 1}
+        }
+      }
+      
+      parents <- array(0:0, c(0))
+      ps <- array(0:0, c(0))
+      bmi <- array(0:0, c(0))
+      
+      
+      #5. Create children with BMI & PGS
+      
+      #penetrance factor
+      if (t <= 5){
+        factor <- 1.4
+      }else{
+        factor <- 1.4
+      }
+      
+      for (i in 1:nrow(coup)){
+        if (coup$ch [i] > 0){
+          for (j in 1:coup$ch [i]){
+            parents <- c(parents, coup$V1 [i])
+            ps <- c(ps, coup$V2[i]+ rnorm(1, mean=0, sd = 1))
+            bmi <- c(bmi, 27.796 + factor*1.071*ps[length(ps)])# + rnorm (1, mean = 0, sd = 4.55))
+          }
+        }
+      }
+      
+      pgs <- as.data.frame(cbind(parents, ps, bmi))
+      
+      bmi_sim [t, 1, s] <- mean(pgs$bmi)
+      bmi_sim [t, 2, s] <- sd(pgs$bmi)
+      prs_sim [t, 1, s] <- mean(pgs$ps)
+      prs_sim [t, 2, s] <- sd(pgs$ps)
+      
+      pgs$BMI <- ifelse(pgs$bmi < 18.5, 1, ifelse(pgs$bmi < 25, 2, ifelse(pgs$bmi < 30, 3, 4)))
+      
+      #change order
+      pgs$parents [pgs$parents == 21] <- 12
+      pgs$parents [pgs$parents == 31] <- 13
+      pgs$parents [pgs$parents == 32] <- 23
+      pgs$parents [pgs$parents == 41] <- 14
+      pgs$parents [pgs$parents == 42] <- 24
+      pgs$parents [pgs$parents == 43] <- 34
+      
+      for (zz in 1:16){
+        tt <- subset(pgs, parents == class [zz])
+        if (nrow(tt)>0){
+          her [,zz] <- table(factor(tt$BMI, levels=1:4))/nrow(tt)
+          for (ee in 1:4){
+            rw <- length(which(tt$BMI==ee))
+            if (rw > 0){
+              bmis [ee, zz] <- mean (tt$bmi[tt$BMI == ee])
+              pgss [ee, zz] <- mean (tt$ps[tt$BMI == ee])
+            }else{
+              bmis [ee, zz] <- 0
+              pgss [ee, zz] <- 0
+            }
+          }
+        }
+      }
+      
+      her [,5] <- her [,2]
+      her [,9] <- her [,3]
+      her [,10] <- her [,7]
+      her [,13] <- her [,4]
+      her [,14] <- her [,8]
+      her [,15] <- her [,12]
+      bmis [,5] <- bmis [,2]
+      bmis [,9] <- bmis [,3]
+      bmis [,10] <- bmis [,7]
+      bmis [,13] <- bmis [,4]
+      bmis [,14] <- bmis [,8]
+      bmis [,15] <- bmis [,12]
+      pgss [,5] <- pgss [,2]
+      pgss [,9] <- pgss [,3]
+      pgss [,10] <- pgss [,7]
+      pgss [,13] <- pgss [,4]
+      pgss [,14] <- pgss [,8]
+      pgss [,15] <- pgss [,12]
+      
+      for (qq in 1:4){
+        vec <- child * her [qq,]
+        if (sum(vec) != 0){
+          bmi_cat [t,qq,1,s] <- sum(vec*bmis[qq,])/sum(vec)
+          prs_cat [t,qq,1,s] <- sum(vec*pgss[qq,])/sum(vec)
+          #bmi_cat [t,qq,2,s] <- sd(pgs$ps[pgs$BMI == qq])
+          prs_cat [t,qq,2,s] <- sd(pgs$ps[pgs$BMI == qq])
+        }else{
+          bmi_cat [t,qq,1,s] <- bmi_cat [t-1,qq,1,s]
+          prs_cat [t,qq,1,s] <- prs_cat [t-1,qq,1,s]
+        }
+      }
+           
+      
+      new <- array(0:0,c(4))
+      for (i in 1:16){
+        new <- new + child[i]*her[,i]/sum(child)
+      }
+      
+      
+      dis [t, , s] <- new
+      
+      
+      
+      bmir [t, 1, s] <- sum(bmi_cat [t,,1,s] * new)
+      prs [t, 1, s] <- sum(prs_cat [t,,1,s] * new)
+      
+      pgs <- pgs[,c("ps", "BMI")]
+      #print (t)
+      
+      if (nrow(pgs)>10000){
+        r <- sample(1:nrow(pgs), 10000, replace = F)
+        pgs <- pgs [r,]
+      }
+      #print (t)
+    }
+    #fin [u, ffff, s] <- dis [g, 4, s]
+    
+  }
+  mat <- omega
+  fer <- phi
+  pen <- factor
+  
+  folder <- "Res_pen/mixed/test"
+  
+  filename <- paste("~/ECHO/obesity/",folder,"/dis_", mat, "_", fer,"_",pen, ".rds", sep="")
+  saveRDS(dis, file = filename)
+
+  saveRDS(bmir, file = paste("~/ECHO/obesity/",folder,"/bmi_", mat, "_", fer,"_",pen, ".rds", sep=""))
+  saveRDS(prs, file = paste("~/ECHO/obesity/",folder,"/prs_", mat, "_", fer,"_",pen, ".rds", sep=""))
+  saveRDS(bmi_cat, file = paste("~/ECHO/obesity/",folder,"/bmiCAT_", mat, "_", fer,"_",pen, ".rds", sep=""))
+  saveRDS(prs_cat, file = paste("~/ECHO/obesity/",folder,"/prsCAT_", mat, "_", fer,"_",pen, ".rds", sep=""))
+  saveRDS(bmi_sim, file = paste("~/ECHO/obesity/",folder,"/bmiSIM_", mat, "_", fer,"_",pen, ".rds", sep=""))
+  saveRDS(prs_sim, file = paste("~/ECHO/obesity/",folder,"/prsSIM_", mat, "_", fer,"_",pen, ".rds", sep=""))
+
+  # filename <- paste("~/ECHO/obesity/Res_2/matrices.rds", sep="")
+  # saveRDS(matrices, file = filename)
+  }
+}
